@@ -1,0 +1,129 @@
+#!/bin/bash
+
+NUM_RUNS=""
+TEST_CASE=""
+WEBSITE_HOST=""
+URL_PATH=""
+NUM_USERS=10
+NUM_SECONDS=600
+ASSERT_STRING=""
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+# Argument parsing
+for i in "$@"; do
+  case $i in
+    --assert_string=*)
+      ASSERT_STRING="${i#*=}"
+      shift # past argument=value
+      ;;
+    --num_seconds=*)
+      NUM_SECONDS="${i#*=}"
+      shift # past argument=value
+      ;;
+    --num_runs=*)
+      NUM_RUNS="${i#*=}"
+      shift # past argument=value
+      ;;
+    --num_users=*)
+      NUM_USERS="${i#*=}"
+      shift # past argument=value
+      ;;
+    --website_host=*)
+      WEBSITE_HOST="${i#*=}"
+      shift # past argument=value
+      ;;
+    --test_case=*)
+      TEST_CASE="${i#*=}"
+      shift # past argument=value
+      ;;
+    --url_path=*)
+      URL_PATH="${i#*=}"
+      shift # past argument=value
+      ;;
+    --*)
+      echo "Unknown option $i"
+      exit 1
+      ;;
+    *)
+      ;;
+  esac
+done
+
+RUN_NAME=$1
+REPORT_FOLDER="report"
+
+if [[ $RUN_NAME == "" ]]; then
+  echo "Please provide a name for the run"
+  exit 1
+fi
+
+if [[ $ASSERT_STRING == "" ]]; then
+  echo "Please provide a --assert_string argument to verify a successful response"
+  exit 1
+fi
+
+if [[ $WEBSITE_HOST == "" ]]; then
+  echo "Please provide a --website_host argument to specify the website to test"
+  WEBSITE_HOST="drum.sandbox.lib.umd.edu"
+fi
+
+if [[ $TEST_CASE == "" ]]; then
+  echo "No test case was specified, defaulting to website_stress_test.jmx"
+  TEST_CASE="website_stress_test.jmx"
+fi
+
+if [[ $NUM_RUNS == "" ]]; then
+  echo "No number of runs were specified, defaulting to 1"
+  NUM_RUNS=1
+fi
+
+if [[ $URL_PATH == "" ]]; then
+  echo "No url path specified, defaulting to '/'"
+  URL_PATH="/"
+fi
+
+CURRENT_TIME=$(date "+%Y-%m-%d_%H-%M-%S")
+RUN_NAME="$CURRENT_TIME--$RUN_NAME--$TEST_CASE"
+
+cd $SCRIPT_DIR
+mkdir -p "$RUN_NAME"
+
+# log the parameters for later reference
+{
+echo "$RUN_NAME - $CURRENT_TIME"
+echo "=============================="
+echo "Number of runs to complete: $NUM_RUNS"
+echo "Test case: $TEST_CASE"
+echo "Number of users: $NUM_USERS"
+echo "Number of seconds: $NUM_SECONDS"
+echo "Website host: $WEBSITE_HOST"
+echo "URL path: $URL_PATH"
+echo "Assert string: '$ASSERT_STRING'"
+} > "$RUN_NAME/parameters_used.log"
+
+CURRENT_RUN_NUMBER=1
+
+while [ "$CURRENT_RUN_NUMBER" -le "$NUM_RUNS" ]
+do
+  CURRENT_RUN_FOLDER="$RUN_NAME/run-$CURRENT_RUN_NUMBER"
+  echo "Running test $CURRENT_RUN_NUMBER of $NUM_RUNS"
+  mkdir -p "$CURRENT_RUN_FOLDER/$REPORT_FOLDER"
+  jmeter -n -t $TEST_CASE -J website_host="$WEBSITE_HOST" -J url_path="$URL_PATH" -J num_users=$NUM_USERS -J num_seconds=$NUM_SECONDS -J assert_string="$ASSERT_STRING" -l "$CURRENT_RUN_FOLDER/result.jtl" -j "$CURRENT_RUN_FOLDER/jmeter.log" -e -o "$CURRENT_RUN_FOLDER/$REPORT_FOLDER"
+  CURRENT_RUN_NUMBER=$((CURRENT_RUN_NUMBER+1))
+done
+
+echo "All runs complete, generating aggregate report"
+
+CURRENT_RUN_NUMBER=1
+while [ "$CURRENT_RUN_NUMBER" -le "$NUM_RUNS" ]
+do
+  STATS_FILE="$RUN_NAME/run-$CURRENT_RUN_NUMBER/$REPORT_FOLDER/statistics.json"
+  RESPONSE_TIME99=$(jq .Total.pct3ResTime < "$STATS_FILE")
+  ERROR_RATE=$(jq .Total.errorPct < "$STATS_FILE")
+  SAMPLES_TAKEN=$(jq .Total.sampleCount < "$STATS_FILE")
+  SUMMARY="Run $CURRENT_RUN_NUMBER of $NUM_RUNS p99 response time: $RESPONSE_TIME99 ms at $ERROR_RATE% error rate ($SAMPLES_TAKEN samples)"
+  echo "$SUMMARY"
+  echo "$SUMMARY" >> "$RUN_NAME/summary.txt"
+  CURRENT_RUN_NUMBER=$((CURRENT_RUN_NUMBER+1))
+done
