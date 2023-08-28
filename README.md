@@ -117,3 +117,9 @@ The report subdirectories contain the following:
   * A "jmeter.log" file of the console output of the run
   * A "result.jtl" CSV file summarizing the result of each request to the
     server
+
+## License
+
+See the [LICENSE](LICENSE.md) file for license rights and limitations
+(Apache 2.0).
+
